@@ -176,18 +176,10 @@ if df_raw is None or df_raw.empty:
     st.warning("Nenhum dado encontrado na planilha.")
     st.stop()
 
-# --- FILTRO DE EXCLUSÃO DE COLABORADORES ---
-st.sidebar.markdown("---")
-st.sidebar.subheader("🚫 Gestão de Exclusões")
-lista_colaboradores = sorted(df_raw["Nome"].unique().tolist())
-excluidos = st.sidebar.multiselect(
-    "Selecione colaboradores a EXCLUIR dos resultados:",
-    options=lista_colaboradores,
-    help="Utilize para filtrar estagiários, novatos em treinamento ou apoios temporários."
-)
-
-# Aplicação da exclusão na base
-df_base = df_raw[~df_raw["Nome"].isin(excluidos)].copy()
+# A exclusão de colaboradores agora é feita individualmente dentro de cada
+# aba (Separação / Conferência), pois um operador pode atuar nos dois
+# ambientes e a exclusão em um não deve afetar o outro.
+df_base = df_raw.copy()
 
 # --- FILTRO DE DATAS ---
 st.sidebar.markdown("---")
@@ -233,6 +225,21 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
 
     if df_ambiente.empty:
         st.info(f"Nenhum registro encontrado para o ambiente de **{nome_ambiente}** no período selecionado.")
+        return
+
+    # --- FILTRO DE EXCLUSÃO DE COLABORADORES (específico deste ambiente) ---
+    st.markdown(f"#### 🚫 Exclusão de Colaboradores — {nome_ambiente}")
+    lista_colaboradores_ambiente = sorted(df_ambiente["Nome"].unique().tolist())
+    excluidos_ambiente = st.multiselect(
+        f"Selecione colaboradores a EXCLUIR apenas do ambiente de {nome_ambiente}:",
+        options=lista_colaboradores_ambiente,
+        help="Afeta somente este ambiente. Um operador excluído aqui continua aparecendo normalmente na outra aba.",
+        key=f"exclusao_{nome_ambiente}"
+    )
+    df_ambiente = df_ambiente[~df_ambiente["Nome"].isin(excluidos_ambiente)].copy()
+
+    if df_ambiente.empty:
+        st.info(f"Todos os colaboradores de **{nome_ambiente}** foram excluídos do período selecionado.")
         return
 
     # Consolidado por Operador
@@ -317,6 +324,7 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
 
     tot_unid = agrupado["Total_Unidades"].sum()
     tot_visitas = agrupado["Total_Visitas"].sum()
+    tot_peso = agrupado["Total_Peso"].sum()
     tot_horas = agrupado["Tempo_Horas"].sum()
     uph_media_eq = round(tot_unid / tot_horas, 1) if tot_horas > 0 else 0
 
@@ -324,12 +332,13 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
     c_atencao = (agrupado["Status"] == "🟡 Atenção").sum()
     c_critico = (agrupado["Status"] == "🔴 Crítico").sum()
 
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Unidades Processadas", f"{int(tot_unid):,}")
     m2.metric("Total de Visitas", f"{int(tot_visitas):,}")
-    m3.metric("Média UPH da Equipe", f"{uph_media_eq} unid/h")
-    m4.metric("Operadores Ativos", len(agrupado))
-    m5.metric("Status da Equipe", f"🟢{c_na_meta} | 🟡{c_atencao} | 🔴{c_critico}")
+    m3.metric("Peso Processado", f"{tot_peso:,.1f} kg")
+    m4.metric("Média UPH da Equipe", f"{uph_media_eq} unid/h")
+    m5.metric("Operadores Ativos", len(agrupado))
+    m6.metric("Status da Equipe", f"🟢{c_na_meta} | 🟡{c_atencao} | 🔴{c_critico}")
 
     # -------------------------------------------------------------------------
     # LEADERBOARD E ALERTAS CRÍTICOS
@@ -340,7 +349,7 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
     with col_tabela:
         st.subheader("🏆 Ranking de Colaboradores")
         st.dataframe(
-            agrupado[["Status", "Nome", "UPH", "% Meta UPH", "PPH", "Total_Unidades", "Tempo_Horas"]],
+            agrupado[["Status", "Nome", "UPH", "% Meta UPH", "PPH", "Total_Unidades", "Total_Peso", "Tempo_Horas"]],
             column_config={
                 "Status": st.column_config.TextColumn("Status", width="medium"),
                 "Nome": "Colaborador",
@@ -352,6 +361,7 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
                     max_value=150
                 ),
                 "PPH": st.column_config.NumberColumn("PPH", format="%.1f 🚶"),
+                "Total_Peso": st.column_config.NumberColumn("Peso Processado", format="%.1f kg ⚖️"),
                 "Tempo_Horas": st.column_config.NumberColumn("Horas Trab.", format="%.1f h"),
             },
             use_container_width=True
@@ -369,6 +379,7 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
                     f"<b>👤 {r['Nome']}</b><br>"
                     f"• <b>UPH Atual:</b> {r['UPH']} (Meta: {meta_uph_manual})<br>"
                     f"• <b>Diferença:</b> <span style='color: #dc2626;'>{dif} unid/h ({r['% Meta UPH']}%)</span><br>"
+                    f"• <b>Peso Processado:</b> {round(r['Total_Peso'], 1)} kg<br>"
                     f"• <b>Tempo Registrado:</b> {round(r['Tempo_Horas'], 1)}h"
                     f"</div>",
                     unsafe_allow_html=True
