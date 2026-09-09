@@ -6,7 +6,7 @@
    pip install -r requirements.txt
 
 2. Rode o app:
-   streamlit run dashboard_produtividade.py
+   streamlit run dashboard_produtividade (1).py
 
 3. O navegador abrirá automaticamente em http://localhost:8501
 
