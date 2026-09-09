@@ -87,6 +87,42 @@ def converter_duracao_para_horas(duracao_str):
     except Exception:
         return 0.0
 
+def converter_numero_flexivel(valor):
+    """
+    Converte um valor numérico vindo da planilha para float, detectando
+    automaticamente se o separador decimal é vírgula (formato brasileiro,
+    ex: 1.234,56) ou ponto (formato internacional, ex: 1234.56).
+
+    Regras:
+    - Se houver vírgula E ponto no mesmo valor: assume formato brasileiro
+      com separador de milhar (ponto) e decimal (vírgula) -> "1.234,56" -> 1234.56
+    - Se houver apenas vírgula: a vírgula é o separador decimal -> "1234,56" -> 1234.56
+    - Se houver apenas ponto (ou nenhum separador): já está no formato
+      correto para o Python -> "12.5" -> 12.5 / "1234" -> 1234.0
+      (Isso cobre o caso do campo Peso, que vem da planilha usando ponto
+      como separador decimal, não como separador de milhar.)
+    """
+    if pd.isna(valor):
+        return 0.0
+
+    texto = str(valor).strip()
+    if texto in ["", "nan", "None"]:
+        return 0.0
+
+    tem_virgula = "," in texto
+    tem_ponto = "." in texto
+
+    try:
+        if tem_virgula and tem_ponto:
+            texto = texto.replace(".", "").replace(",", ".")
+        elif tem_virgula and not tem_ponto:
+            texto = texto.replace(",", ".")
+        # Se só tem ponto (ou nenhum separador), o valor já está pronto
+        # para ser convertido diretamente, sem remover nada.
+        return float(texto)
+    except Exception:
+        return 0.0
+
 CONFIG_PATH = "filtros_salvos.json"
 
 def carregar_config():
@@ -157,10 +193,10 @@ def carregar_dados_google_sheets(url_planilha):
         if "Data" in df.columns:
             df["Data"] = pd.to_datetime(df["Data"], dayfirst=True, errors="coerce")
             
-        # Tratamento de valores numéricos
+        # Tratamento de valores numéricos (detecta automaticamente vírgula ou ponto como decimal)
         for col_num in ["Qt Produtos", "Unidades", "Peso", "Volume"]:
             if col_num in df.columns:
-                df[col_num] = pd.to_numeric(df[col_num].astype(str).str.replace(".", "").str.replace(",", "."), errors="coerce").fillna(0)
+                df[col_num] = df[col_num].apply(converter_numero_flexivel)
             else:
                 df[col_num] = 0
 
