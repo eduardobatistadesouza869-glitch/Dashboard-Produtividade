@@ -372,18 +372,21 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
     # -------------------------------------------------------------------------
     top_uph = agrupado.nlargest(n_top_sugestao, "UPH")["UPH"].mean()
     top_pph = agrupado.nlargest(n_top_sugestao, "PPH")["PPH"].mean()
+    top_kph = agrupado.nlargest(n_top_sugestao, "KPH")["KPH"].mean()
 
     sugestao_uph_val = round(top_uph if pd.notna(top_uph) else 100.0, 1)
     sugestao_pph_val = round(top_pph if pd.notna(top_pph) else 30.0, 1)
+    sugestao_kph_val = round(top_kph if pd.notna(top_kph) else 100.0, 1)
 
     # Usa a meta salva anteriormente como valor inicial, se existir; caso contrário, a sugestão automática
     valor_inicial_uph = config_salva.get(f"meta_uph_{nome_ambiente}", sugestao_uph_val)
     valor_inicial_pph = config_salva.get(f"meta_pph_{nome_ambiente}", sugestao_pph_val)
+    valor_inicial_kph = config_salva.get(f"meta_kph_{nome_ambiente}", sugestao_kph_val)
 
     # Bloco de Ajuste de Metas
     st.markdown(f"### 🎯 Definição de Metas — {nome_ambiente}")
     
-    col_meta1, col_meta2 = st.columns(2)
+    col_meta1, col_meta2, col_meta3 = st.columns(3)
     with col_meta1:
         meta_uph_manual = st.number_input(
             f"Meta Manual UPH (Unidades/Hora) - {nome_ambiente}",
@@ -410,15 +413,31 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
             unsafe_allow_html=True
         )
 
+    with col_meta3:
+        meta_kph_manual = st.number_input(
+            f"Meta Manual KPH (Kg/Hora) - {nome_ambiente}",
+            value=float(valor_inicial_kph),
+            step=5.0,
+            key=f"meta_kph_{nome_ambiente}"
+        )
+        st.markdown(
+            f"<div class='suggestion-box'>💡 <b>Sugestão Automática: {sugestao_kph_val} KPH</b> "
+            f"(Média do TOP {n_top_sugestao} de {nome_ambiente})</div>", 
+            unsafe_allow_html=True
+        )
+
     # Salva as metas manuais escolhidas para a próxima visita
     if (config_salva.get(f"meta_uph_{nome_ambiente}") != meta_uph_manual or
-            config_salva.get(f"meta_pph_{nome_ambiente}") != meta_pph_manual):
+            config_salva.get(f"meta_pph_{nome_ambiente}") != meta_pph_manual or
+            config_salva.get(f"meta_kph_{nome_ambiente}") != meta_kph_manual):
         config_salva[f"meta_uph_{nome_ambiente}"] = meta_uph_manual
         config_salva[f"meta_pph_{nome_ambiente}"] = meta_pph_manual
+        config_salva[f"meta_kph_{nome_ambiente}"] = meta_kph_manual
         salvar_config(config_salva)
 
     # Atingimento e Status
     agrupado["% Meta UPH"] = ((agrupado["UPH"] / meta_uph_manual) * 100).round(1)
+    agrupado["% Meta KPH"] = ((agrupado["KPH"] / meta_kph_manual) * 100).round(1)
     
     def aplicar_status(row):
         if row["UPH"] >= meta_uph_manual:
@@ -467,19 +486,25 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
     with col_tabela:
         st.subheader("🏆 Ranking de Colaboradores")
         st.dataframe(
-            agrupado[["Status", "Nome", "UPH", "% Meta UPH", "PPH", "KPH", "Total_Unidades", "Total_Peso", "Tempo_Horas"]],
+            agrupado[["Status", "Nome", "UPH", "% Meta UPH", "PPH", "KPH", "% Meta KPH", "Total_Unidades", "Total_Peso", "Tempo_Horas"]],
             column_config={
                 "Status": st.column_config.TextColumn("Status", width="medium"),
                 "Nome": "Colaborador",
                 "UPH": st.column_config.NumberColumn("UPH", format="%.1f 📦"),
                 "% Meta UPH": st.column_config.ProgressColumn(
-                    "% Atingimento Meta",
+                    "% Meta UPH",
                     format="%.1f%%",
                     min_value=0,
                     max_value=150
                 ),
                 "PPH": st.column_config.NumberColumn("PPH", format="%.1f 🚶"),
                 "KPH": st.column_config.NumberColumn("KPH (kg/h)", format="%.1f ⚖️"),
+                "% Meta KPH": st.column_config.ProgressColumn(
+                    "% Meta KPH",
+                    format="%.1f%%",
+                    min_value=0,
+                    max_value=150
+                ),
                 "Total_Peso": st.column_config.NumberColumn("Peso Processado", format="%.1f kg ⚖️"),
                 "Tempo_Horas": st.column_config.NumberColumn("Horas Trab.", format="%.1f h"),
             },
@@ -493,12 +518,13 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
         if not df_criticos.empty:
             for _, r in df_criticos.iterrows():
                 dif = round(r["UPH"] - meta_uph_manual, 1)
+                dif_kph = round(r["KPH"] - meta_kph_manual, 1)
                 st.markdown(
                     f"<div class='critical-card'>"
                     f"<b>👤 {r['Nome']}</b><br>"
                     f"• <b>UPH Atual:</b> {r['UPH']} (Meta: {meta_uph_manual})<br>"
                     f"• <b>Diferença:</b> <span style='color: #dc2626;'>{dif} unid/h ({r['% Meta UPH']}%)</span><br>"
-                    f"• <b>Peso Processado:</b> {round(r['Total_Peso'], 1)} kg ({round(r['KPH'], 1)} kg/h)<br>"
+                    f"• <b>Peso Processado:</b> {round(r['Total_Peso'], 1)} kg ({round(r['KPH'], 1)} kg/h, Meta: {meta_kph_manual} kg/h, {r['% Meta KPH']}%)<br>"
                     f"• <b>Tempo Registrado:</b> {round(r['Tempo_Horas'], 1)}h"
                     f"</div>",
                     unsafe_allow_html=True
@@ -511,23 +537,44 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
     # -------------------------------------------------------------------------
     st.markdown("---")
     st.subheader("📈 Comparativo de Desempenho x Meta")
-    
-    fig = px.bar(
-        agrupado,
-        x="Nome",
-        y="UPH",
-        color="Status",
-        color_discrete_map={
-            "🟢 Na Meta": "#16a34a",
-            "🟡 Atenção": "#eab308",
-            "🔴 Crítico": "#dc2626"
-        },
-        text="UPH",
-        title=f"Rendimento Individual de UPH - {nome_ambiente}"
-    )
-    fig.add_hline(y=meta_uph_manual, line_dash="dash", line_color="#0284c7", annotation_text="Meta Estabelecida")
-    fig.update_layout(xaxis_title="Colaborador", yaxis_title="Unidades Por Hora (UPH)", template="plotly_white")
-    st.plotly_chart(fig, use_container_width=True)
+
+    col_graf1, col_graf2 = st.columns(2)
+
+    with col_graf1:
+        fig = px.bar(
+            agrupado,
+            x="Nome",
+            y="UPH",
+            color="Status",
+            color_discrete_map={
+                "🟢 Na Meta": "#16a34a",
+                "🟡 Atenção": "#eab308",
+                "🔴 Crítico": "#dc2626"
+            },
+            text="UPH",
+            title=f"Rendimento Individual de UPH - {nome_ambiente}"
+        )
+        fig.add_hline(y=meta_uph_manual, line_dash="dash", line_color="#0284c7", annotation_text="Meta UPH")
+        fig.update_layout(xaxis_title="Colaborador", yaxis_title="Unidades Por Hora (UPH)", template="plotly_white")
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col_graf2:
+        fig_peso = px.bar(
+            agrupado,
+            x="Nome",
+            y="KPH",
+            color="Status",
+            color_discrete_map={
+                "🟢 Na Meta": "#16a34a",
+                "🟡 Atenção": "#eab308",
+                "🔴 Crítico": "#dc2626"
+            },
+            text="KPH",
+            title=f"Rendimento Individual de Peso (KPH) - {nome_ambiente}"
+        )
+        fig_peso.add_hline(y=meta_kph_manual, line_dash="dash", line_color="#0284c7", annotation_text="Meta KPH")
+        fig_peso.update_layout(xaxis_title="Colaborador", yaxis_title="Quilos Por Hora (KPH)", template="plotly_white")
+        st.plotly_chart(fig_peso, use_container_width=True)
 
 # Execução das abas separadas
 with aba_separacao:
@@ -561,11 +608,13 @@ with st.expander("📖 Glossário Operacional e Regras de Cálculo", expanded=Fa
       *(Exemplo: 01h30m equivale a 1.5 horas).*
 
     * **Sugestão Automática de Meta (TOP N):**  
-      * **Ambiente de Separação:** Média aritmética do UPH/PPH dos **8 melhores colaboradores** do período selecionado.  
-      * **Ambiente de Conferência:** Média aritmética do UPH/PPH dos **2 melhores colaboradores** do período selecionado.
+      * **Ambiente de Separação:** Média aritmética do UPH/PPH/KPH dos **8 melhores colaboradores** do período selecionado.  
+      * **Ambiente de Conferência:** Média aritmética do UPH/PPH/KPH dos **2 melhores colaboradores** do período selecionado.
 
     * **Faixas de Status:**  
-      * 🟢 **Na Meta:** Desempenho igual ou superior a **100%** da meta configurada.  
-      * 🟡 **Atenção:** Desempenho entre **80% e 99.9%** da meta configurada.  
-      * 🔴 **Crítico:** Desempenho inferior a **80%** da meta configurada.
+      * 🟢 **Na Meta:** Desempenho igual ou superior a **100%** da meta de UPH configurada.  
+      * 🟡 **Atenção:** Desempenho entre **80% e 99.9%** da meta de UPH configurada.  
+      * 🔴 **Crítico:** Desempenho inferior a **80%** da meta de UPH configurada.  
+
+      *Observação: o Status (cores) é calculado com base na meta de UPH. A meta de KPH (peso) é exibida separadamente, na coluna "% Meta KPH" e no gráfico de peso, para acompanhamento complementar.*
     """)
