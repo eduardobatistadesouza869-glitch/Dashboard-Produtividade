@@ -437,15 +437,37 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
 
     # Atingimento e Status
     agrupado["% Meta UPH"] = ((agrupado["UPH"] / meta_uph_manual) * 100).round(1)
+    agrupado["% Meta PPH"] = ((agrupado["PPH"] / meta_pph_manual) * 100).round(1)
     agrupado["% Meta KPH"] = ((agrupado["KPH"] / meta_kph_manual) * 100).round(1)
-    
+
     def aplicar_status(row):
-        if row["UPH"] >= meta_uph_manual:
+        pct_uph = row["% Meta UPH"]
+        pct_pph = row["% Meta PPH"]
+        pct_kph = row["% Meta KPH"]
+
+        # CAMINHO NORMAL: mantém a exigência cheia de UPH e PPH, mas o peso
+        # (KPH) só precisa atingir 40% da meta — cobre operações com mix de
+        # produtos leves, onde o peso naturalmente fica abaixo da meta.
+        bateu_normal = pct_uph >= 100 and pct_pph >= 100 and pct_kph >= 40
+
+        # CAMINHO COMPENSADO PELO PESO: se o colaborador bateu a meta de
+        # peso (produtos mais pesados que reduzem o ritmo de UPH/PPH), a
+        # exigência de UPH e PPH cai para 50% da meta.
+        bateu_compensado = pct_kph >= 100 and pct_uph >= 50 and pct_pph >= 50
+
+        if bateu_normal or bateu_compensado:
             return "🟢 Na Meta"
-        elif row["UPH"] >= (meta_uph_manual * 0.8):
+
+        # Faixa de Atenção: mesma lógica dos dois caminhos, mas com os
+        # limiares reduzidos a 80% (mantendo a mesma régua usada no restante
+        # do dashboard para "quase batendo a meta").
+        quase_normal = pct_uph >= 80 and pct_pph >= 80 and pct_kph >= 32   # 80% de 40%
+        quase_compensado = pct_kph >= 80 and pct_uph >= 40 and pct_pph >= 40  # 80% de 50%
+
+        if quase_normal or quase_compensado:
             return "🟡 Atenção"
-        else:
-            return "🔴 Crítico"
+
+        return "🔴 Crítico"
 
     agrupado["Status"] = agrupado.apply(aplicar_status, axis=1)
     agrupado = agrupado.sort_values(by="UPH", ascending=False).reset_index(drop=True)
@@ -486,7 +508,7 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
     with col_tabela:
         st.subheader("🏆 Ranking de Colaboradores")
         st.dataframe(
-            agrupado[["Status", "Nome", "UPH", "% Meta UPH", "PPH", "KPH", "% Meta KPH", "Total_Unidades", "Total_Peso", "Tempo_Horas"]],
+            agrupado[["Status", "Nome", "UPH", "% Meta UPH", "PPH", "% Meta PPH", "KPH", "% Meta KPH", "Total_Unidades", "Total_Peso", "Tempo_Horas"]],
             column_config={
                 "Status": st.column_config.TextColumn("Status", width="medium"),
                 "Nome": "Colaborador",
@@ -498,6 +520,12 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
                     max_value=150
                 ),
                 "PPH": st.column_config.NumberColumn("PPH", format="%.1f 🚶"),
+                "% Meta PPH": st.column_config.ProgressColumn(
+                    "% Meta PPH",
+                    format="%.1f%%",
+                    min_value=0,
+                    max_value=150
+                ),
                 "KPH": st.column_config.NumberColumn("KPH (kg/h)", format="%.1f ⚖️"),
                 "% Meta KPH": st.column_config.ProgressColumn(
                     "% Meta KPH",
@@ -512,19 +540,17 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
         )
 
     with col_alertas:
-        st.subheader("⚠️ Operadores em Zona Crítica (<80%)")
+        st.subheader("⚠️ Operadores em Zona Crítica")
         df_criticos = agrupado[agrupado["Status"] == "🔴 Crítico"]
 
         if not df_criticos.empty:
             for _, r in df_criticos.iterrows():
-                dif = round(r["UPH"] - meta_uph_manual, 1)
-                dif_kph = round(r["KPH"] - meta_kph_manual, 1)
                 st.markdown(
                     f"<div class='critical-card'>"
                     f"<b>👤 {r['Nome']}</b><br>"
-                    f"• <b>UPH Atual:</b> {r['UPH']} (Meta: {meta_uph_manual})<br>"
-                    f"• <b>Diferença:</b> <span style='color: #dc2626;'>{dif} unid/h ({r['% Meta UPH']}%)</span><br>"
-                    f"• <b>Peso Processado:</b> {round(r['Total_Peso'], 1)} kg ({round(r['KPH'], 1)} kg/h, Meta: {meta_kph_manual} kg/h, {r['% Meta KPH']}%)<br>"
+                    f"• <b>UPH:</b> {r['UPH']} / Meta {meta_uph_manual} ({r['% Meta UPH']}%)<br>"
+                    f"• <b>PPH:</b> {r['PPH']} / Meta {meta_pph_manual} ({r['% Meta PPH']}%)<br>"
+                    f"• <b>KPH:</b> {r['KPH']} kg/h / Meta {meta_kph_manual} kg/h ({r['% Meta KPH']}%)<br>"
                     f"• <b>Tempo Registrado:</b> {round(r['Tempo_Horas'], 1)}h"
                     f"</div>",
                     unsafe_allow_html=True
@@ -611,10 +637,13 @@ with st.expander("📖 Glossário Operacional e Regras de Cálculo", expanded=Fa
       * **Ambiente de Separação:** Média aritmética do UPH/PPH/KPH dos **8 melhores colaboradores** do período selecionado.  
       * **Ambiente de Conferência:** Média aritmética do UPH/PPH/KPH dos **2 melhores colaboradores** do período selecionado.
 
-    * **Faixas de Status:**  
-      * 🟢 **Na Meta:** Desempenho igual ou superior a **100%** da meta de UPH configurada.  
-      * 🟡 **Atenção:** Desempenho entre **80% e 99.9%** da meta de UPH configurada.  
-      * 🔴 **Crítico:** Desempenho inferior a **80%** da meta de UPH configurada.  
+    * **Regra de Compensação por Peso:**  
+      Como o mix de produtos varia bastante em peso, um colaborador não precisa necessariamente bater as **3 metas ao mesmo tempo** (UPH, PPH e KPH). O Status é definido pelo melhor dos dois caminhos abaixo:
+      * **Caminho Normal:** bate 100% da meta de UPH **e** 100% da meta de PPH — nesse caso, só precisa atingir **40%** da meta de KPH (peso).
+      * **Caminho Compensado pelo Peso:** bate 100% da meta de KPH (peso) — nesse caso, só precisa atingir **50%** das metas de UPH e PPH.
 
-      *Observação: o Status (cores) é calculado com base na meta de UPH. A meta de KPH (peso) é exibida separadamente, na coluna "% Meta KPH" e no gráfico de peso, para acompanhamento complementar.*
+    * **Faixas de Status:**  
+      * 🟢 **Na Meta:** Atende integralmente a um dos dois caminhos acima (100% do exigido em cada caminho).  
+      * 🟡 **Atenção:** Está próximo de um dos dois caminhos, com **80%** dos valores exigidos em cada caminho (ex: UPH ≥ 80% e PPH ≥ 80% e KPH ≥ 32%; ou KPH ≥ 80% e UPH ≥ 40% e PPH ≥ 40%).  
+      * 🔴 **Crítico:** Não atinge nem a faixa de Atenção em nenhum dos dois caminhos.
     """)
