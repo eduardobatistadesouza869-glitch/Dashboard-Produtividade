@@ -329,6 +329,7 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
     # Cálculo dos KPIs Individuais
     agrupado["UPH"] = (agrupado["Total_Unidades"] / agrupado["Tempo_Horas"]).round(1)
     agrupado["PPH"] = (agrupado["Total_Visitas"] / agrupado["Tempo_Horas"]).round(1)
+    agrupado["KPH"] = (agrupado["Total_Peso"] / agrupado["Tempo_Horas"]).round(1)
 
     # -------------------------------------------------------------------------
     # CÁLCULO DE METAS POR REFERÊNCIA (SUGESTÃO TOP N)
@@ -406,18 +407,20 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
     tot_peso = agrupado["Total_Peso"].sum()
     tot_horas = agrupado["Tempo_Horas"].sum()
     uph_media_eq = round(tot_unid / tot_horas, 1) if tot_horas > 0 else 0
+    kph_media_eq = round(tot_peso / tot_horas, 1) if tot_horas > 0 else 0
 
     c_na_meta = (agrupado["Status"] == "🟢 Na Meta").sum()
     c_atencao = (agrupado["Status"] == "🟡 Atenção").sum()
     c_critico = (agrupado["Status"] == "🔴 Crítico").sum()
 
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
     m1.metric("Unidades Processadas", f"{int(tot_unid):,}")
     m2.metric("Total de Visitas", f"{int(tot_visitas):,}")
     m3.metric("Peso Processado", f"{tot_peso:,.1f} kg")
     m4.metric("Média UPH da Equipe", f"{uph_media_eq} unid/h")
-    m5.metric("Operadores Ativos", len(agrupado))
-    m6.metric("Status da Equipe", f"🟢{c_na_meta} | 🟡{c_atencao} | 🔴{c_critico}")
+    m5.metric("Média KPH da Equipe", f"{kph_media_eq} kg/h")
+    m6.metric("Operadores Ativos", len(agrupado))
+    m7.metric("Status da Equipe", f"🟢{c_na_meta} | 🟡{c_atencao} | 🔴{c_critico}")
 
     # -------------------------------------------------------------------------
     # LEADERBOARD E ALERTAS CRÍTICOS
@@ -428,7 +431,7 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
     with col_tabela:
         st.subheader("🏆 Ranking de Colaboradores")
         st.dataframe(
-            agrupado[["Status", "Nome", "UPH", "% Meta UPH", "PPH", "Total_Unidades", "Total_Peso", "Tempo_Horas"]],
+            agrupado[["Status", "Nome", "UPH", "% Meta UPH", "PPH", "KPH", "Total_Unidades", "Total_Peso", "Tempo_Horas"]],
             column_config={
                 "Status": st.column_config.TextColumn("Status", width="medium"),
                 "Nome": "Colaborador",
@@ -440,6 +443,7 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
                     max_value=150
                 ),
                 "PPH": st.column_config.NumberColumn("PPH", format="%.1f 🚶"),
+                "KPH": st.column_config.NumberColumn("KPH (kg/h)", format="%.1f ⚖️"),
                 "Total_Peso": st.column_config.NumberColumn("Peso Processado", format="%.1f kg ⚖️"),
                 "Tempo_Horas": st.column_config.NumberColumn("Horas Trab.", format="%.1f h"),
             },
@@ -458,7 +462,7 @@ def processar_ambiente(df_input, termo_busca_tarefa, n_top_sugestao, nome_ambien
                     f"<b>👤 {r['Nome']}</b><br>"
                     f"• <b>UPH Atual:</b> {r['UPH']} (Meta: {meta_uph_manual})<br>"
                     f"• <b>Diferença:</b> <span style='color: #dc2626;'>{dif} unid/h ({r['% Meta UPH']}%)</span><br>"
-                    f"• <b>Peso Processado:</b> {round(r['Total_Peso'], 1)} kg<br>"
+                    f"• <b>Peso Processado:</b> {round(r['Total_Peso'], 1)} kg ({round(r['KPH'], 1)} kg/h)<br>"
                     f"• <b>Tempo Registrado:</b> {round(r['Tempo_Horas'], 1)}h"
                     f"</div>",
                     unsafe_allow_html=True
@@ -511,6 +515,10 @@ with st.expander("📖 Glossário Operacional e Regras de Cálculo", expanded=Fa
     * **PPH (Picks Per Hour / Visitas por Hora):**  
       Mede o ritmo de deslocamento e acesso às posições de estoque (endereços de picking). Calculado dividindo a quantidade de **Qt Produtos (Visitas)** pelo tempo total trabalhado.
       $$\\text{PPH} = \\frac{\\text{Total de Visitas (Qt Produtos)}}{\\text{Horas Trabalhadas}}$$
+
+    * **KPH (Kilos Per Hour / Peso Processado por Hora):**  
+      Mede o volume físico (em peso) movimentado pelo colaborador a cada hora trabalhada. Calculado dividindo o **Peso** total processado pelo tempo total trabalhado.
+      $$\\text{KPH} = \\frac{\\text{Total de Peso (kg)}}{\\text{Horas Trabalhadas}}$$
 
     * **Horas Decimais:**  
       Conversão do tempo `HH:MM` para base numérica decimal para permitir cálculos exatos.  
